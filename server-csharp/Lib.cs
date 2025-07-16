@@ -5,6 +5,7 @@ public static partial class Module
     /////////////////////////////////////////////////////////////
     /// Tables
 
+    // Train entity with departure/arrival station and money value
     [Table(Name = "train", Public = true)]
     public partial struct Train
     {
@@ -15,6 +16,7 @@ public static partial class Module
         public uint money;
     }
 
+    // Station entity containing a list of items
     [Table(Name = "station", Public = true)]
     public partial struct Station
     {
@@ -24,6 +26,7 @@ public static partial class Module
         public List<Item> items;
     }
 
+    // Basic item with quantity
     [Table(Name = "item", Public = true)]
     public partial struct Item
     {
@@ -33,6 +36,7 @@ public static partial class Module
         public uint quantity;
     }
 
+    // Armor entity with defense value
     [Table(Name = "armor", Public = true)]
     public partial struct Armor
     {
@@ -42,6 +46,7 @@ public static partial class Module
         public uint defence;
     }
 
+    // Weapon entity with attack value
     [Table(Name = "weapon", Public = true)]
     public partial struct Weapon
     {
@@ -51,6 +56,7 @@ public static partial class Module
         public uint attack;
     }
 
+    // Consumable item with value (e.g. healing, buffs)
     [Table(Name = "consumables", Public = true)]
     public partial struct Consumables
     {
@@ -60,6 +66,7 @@ public static partial class Module
         public uint value;
     }
 
+    // Player structure with inventory and money
     [Table(Name = "player", Public = true)]
     [Table(Name = "logged_out_player")]
     public partial struct Player
@@ -77,18 +84,22 @@ public static partial class Module
     /////////////////////////////////////////////////////////////
     /// REDUCERS - INIT / CONNECT / LOGIN
 
+    // Called when the database is initialized
     [Reducer(ReducerKind.Init)]
     public static void Init(ReducerContext ctx)
     {
         Log.Info($"[Init] Initializing...");
     }
 
+    // Called when a client connects
     [Reducer(ReducerKind.ClientConnected)]
     public static void Connect(ReducerContext ctx)
     {
         Log.Info($"[Connect] Client connected: {ctx.Sender}");
+
+        // If player is found in logged-out table, move them back to active players
         var player = ctx.Db.logged_out_player.identity.Find(ctx.Sender);
-        if (player != null)
+        if (player.HasValue)
         {
             Log.Info($"[Connect] Found logged out player, moving to active players.");
             ctx.Db.player.Insert(player.Value);
@@ -96,6 +107,7 @@ public static partial class Module
         }
         else
         {
+            // Otherwise, create a new player
             Log.Info($"[Connect] No logged out player found, creating new player.");
             ctx.Db.player.Insert(new Player
             {
@@ -107,10 +119,13 @@ public static partial class Module
         }
     }
 
+    // Called when a client disconnects
     [Reducer(ReducerKind.ClientDisconnected)]
     public static void Disconnect(ReducerContext ctx)
     {
         Log.Info($"[Disconnect] Client disconnected: {ctx.Sender}");
+
+        // Move player to logged_out_player table
         var player = ctx.Db.player.identity.Find(ctx.Sender) ?? throw new Exception("[Disconnect] Player not found");
         ctx.Db.logged_out_player.Insert(player);
         ctx.Db.player.identity.Delete(player.identity);
@@ -120,16 +135,19 @@ public static partial class Module
     /////////////////////////////////////////////////////////////
     /// INSERTING ENTITIES TO TABLES
 
+    // Adds an item or increases its quantity if it already exists
     [Reducer]
     public static void AddItem(ReducerContext ctx, uint _id, string _name)
     {
         Log.Info($"[AddItem] Adding item with ID {_id}, name {_name}");
+
         var entity = ctx.Db.item.id.Find(_id);
-        if (entity != null)
+        if (entity.HasValue)
         {
-            entity.quantity++;
-            ctx.Db.item.id.Update(entity);
-            Log.Info($"[AddItem] Increased quantity of item {_id}. Current quantity: {entity.quantity}");
+            var updated = entity.Value;
+            updated.quantity++;
+            ctx.Db.item.id.Update(updated);
+            Log.Info($"[AddItem] Increased quantity of item {_id}. Current quantity: {updated.quantity}");
         }
         else
         {
@@ -139,153 +157,134 @@ public static partial class Module
         }
     }
 
+    // Deletes or decreases quantity of an item
     [Reducer]
     public static void DeleteItem(ReducerContext ctx, uint _id)
     {
         Log.Info($"[DeleteItem] Deleting item with ID {_id}");
+
         var entity = ctx.Db.item.id.Find(_id) ?? throw new Exception($"[DeleteItem] Item {_id} does not exist!");
+
         if (entity.quantity > 1)
         {
-            entity.quantity--;
-            ctx.Db.item.id.Update(entity);
-            Log.Info($"[DeleteItem] Decreased quantity of item {_id}. Current quantity: {entity.quantity}");
+            var updated = entity;
+            updated.quantity--;
+            ctx.Db.item.id.Update(updated);
+            Log.Info($"[DeleteItem] Decreased quantity of item {_id}. Current quantity: {updated.quantity}");
         }
         else
         {
-            ctx.Db.item.id.Delete(entity);
+            ctx.Db.item.id.Delete(entity.id);
             Log.Info($"[DeleteItem] Item {_id} fully removed!");
         }
     }
 
+    // Adds a train between two stations
     [Reducer]
     public static void AddTrain(ReducerContext ctx, string _id, string _from_station_id, string _to_station_id, uint _money)
     {
-        Log.Info($"[AddTrain] Adding train {_id} from {_from_station_id} to {_to_station_id} with money {_money}");
-        var train = new Train
-        {
-            id = _id,
-            from_station_id = _from_station_id,
-            to_station_id = _to_station_id,
-            money = _money
-        };
+        var train = new Train { id = _id, from_station_id = _from_station_id, to_station_id = _to_station_id, money = _money };
         ctx.Db.train.Insert(train);
-        Log.Info($"[AddTrain] Train {_id} added.");
     }
 
+    // Deletes a train
     [Reducer]
     public static void DeleteTrain(ReducerContext ctx, string _id)
     {
-        Log.Info($"[DeleteTrain] Deleting train {_id}");
-        var entity = ctx.Db.train.identity.Find(_id) ?? throw new Exception($"[DeleteTrain] Train {_id} does not exist!");
-        ctx.Db.train.identity.Delete(entity);
-        Log.Info($"[DeleteTrain] Train {_id} deleted.");
+        var train = ctx.Db.train.id.Find(_id) ?? throw new Exception($"[DeleteTrain] Train {_id} does not exist!");
+        ctx.Db.train.id.Delete(train.id);
     }
 
+    // Adds a new station
     [Reducer]
     public static void AddStation(ReducerContext ctx, string _id, string _name)
     {
-        Log.Info($"[AddStation] Adding station {_id} with name {_name}");
-        var station = new Station
-        {
-            id = _id,
-            name = _name,
-            items = new List<Item>()
-        };
+        var station = new Station { id = _id, name = _name, items = new List<Item>() };
         ctx.Db.station.Insert(station);
-        Log.Info($"[AddStation] Station {_id} added.");
     }
 
+    // Deletes a station
     [Reducer]
     public static void DeleteStation(ReducerContext ctx, string _id)
     {
-        Log.Info($"[DeleteStation] Deleting station {_id}");
-        var entity = ctx.Db.station.identity.Find(_id) ?? throw new Exception($"[DeleteStation] Station {_id} does not exist!");
-        ctx.Db.station.identity.Delete(entity);
-        Log.Info($"[DeleteStation] Station {_id} deleted.");
+        var station = ctx.Db.station.id.Find(_id) ?? throw new Exception($"[DeleteStation] Station {_id} does not exist!");
+        ctx.Db.station.id.Delete(station.id);
     }
 
+    // Adds a weapon and registers it as an item
     [Reducer]
     public static void AddWeapon(ReducerContext ctx, string name, uint attack)
     {
-        Log.Info($"[AddWeapon] Adding weapon {name} with attack {attack}");
         var weapon = new Weapon { name = name, attack = attack };
         ctx.Db.weapon.Insert(weapon);
         AddItem(ctx, weapon.id, weapon.name);
-        Log.Info($"[AddWeapon] Weapon {name} added with ID {weapon.id}.");
     }
 
+    // Deletes a weapon and corresponding item
     [Reducer]
     public static void DeleteWeapon(ReducerContext ctx, uint id)
     {
-        Log.Info($"[DeleteWeapon] Deleting weapon with ID {id}");
         var weapon = ctx.Db.weapon.id.Find(id) ?? throw new Exception($"[DeleteWeapon] Weapon ID {id} not found!");
-        ctx.Db.weapon.id.Delete(weapon);
+        ctx.Db.weapon.id.Delete(weapon.id);
         DeleteItem(ctx, id);
-        Log.Info($"[DeleteWeapon] Weapon with ID {id} deleted.");
     }
 
+    // Adds an armor and registers it as an item
     [Reducer]
     public static void AddArmor(ReducerContext ctx, string name, uint defence)
     {
-        Log.Info($"[AddArmor] Adding armor {name} with defence {defence}");
         var armor = new Armor { name = name, defence = defence };
         ctx.Db.armor.Insert(armor);
         AddItem(ctx, armor.id, armor.name);
-        Log.Info($"[AddArmor] Armor {name} added with ID {armor.id}.");
     }
 
+    // Deletes an armor and corresponding item
     [Reducer]
     public static void DeleteArmor(ReducerContext ctx, uint id)
     {
-        Log.Info($"[DeleteArmor] Deleting armor with ID {id}");
         var armor = ctx.Db.armor.id.Find(id) ?? throw new Exception($"[DeleteArmor] Armor ID {id} not found!");
-        ctx.Db.armor.id.Delete(armor);
+        ctx.Db.armor.id.Delete(armor.id);
         DeleteItem(ctx, id);
-        Log.Info($"[DeleteArmor] Armor with ID {id} deleted.");
     }
 
+    // Adds a consumable and registers it as an item
     [Reducer]
     public static void AddConsumable(ReducerContext ctx, string name, uint value)
     {
-        Log.Info($"[AddConsumable] Adding consumable {name} with value {value}");
         var consumable = new Consumables { name = name, value = value };
         ctx.Db.consumables.Insert(consumable);
         AddItem(ctx, consumable.id, consumable.name);
-        Log.Info($"[AddConsumable] Consumable {name} added with ID {consumable.id}.");
     }
 
+    // Deletes a consumable and corresponding item
     [Reducer]
     public static void DeleteConsumable(ReducerContext ctx, uint id)
     {
-        Log.Info($"[DeleteConsumable] Deleting consumable with ID {id}");
         var consumable = ctx.Db.consumables.id.Find(id) ?? throw new Exception($"[DeleteConsumable] Consumable ID {id} not found!");
-        ctx.Db.consumables.id.Delete(consumable);
+        ctx.Db.consumables.id.Delete(consumable.id);
         DeleteItem(ctx, id);
-        Log.Info($"[DeleteConsumable] Consumable with ID {id} deleted.");
     }
 
+    // Sets the player's name on game entry
     [Reducer]
     public static void EnterGame(ReducerContext ctx, string name)
     {
-        Log.Info($"[EnterGame] Setting player name to {name}");
         var player = ctx.Db.player.identity.Find(ctx.Sender) ?? throw new Exception("[EnterGame] Player not found");
         player.name = name;
         ctx.Db.player.identity.Update(player);
-        Log.Info($"[EnterGame] Player name set to {name}.");
     }
-    
+
+    // Adds an existing item from global table to the player's inventory
     [Reducer]
     public static void AddExistingItemToPlayer(ReducerContext ctx, Identity playerIdentity, uint itemId)
     {
-        Log.Info($"[AddExistingItemToPlayer] Adding item ID {itemId} to player {playerIdentity}");
-
         var player = ctx.Db.player.identity.Find(playerIdentity) ?? throw new Exception($"[AddExistingItemToPlayer] Player {playerIdentity} not found!");
+        var globalItem = ctx.Db.item.id.Find(itemId) ?? throw new Exception($"[AddExistingItemToPlayer] Global item {itemId} not found!");
 
         if (player.items == null)
             player.items = new List<Item>();
-        var globalItem = ctx.Db.item.id.Find(itemId) ?? throw new Exception($"[AddExistingItemToPlayer] Global item {itemId} not found!");
+
         player.items.Add(globalItem);
-        Log.Info($"[AddExistingItemToPlayer] Added new item {itemId} to player");
         ctx.Db.player.identity.Update(player);
     }
 }

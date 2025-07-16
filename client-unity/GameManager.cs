@@ -1,29 +1,26 @@
 using UnityEngine;
 using System;
-using System.Collections.Generic;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
 public class GameManager : MonoBehaviour
 {
+    // Server configuration
     const string SERVER_URL = "http://127.0.0.1:3000";
     const string MODULE_NAME = "spacetime-db-service";
 
-    public static event Action OnConnected;
-    public static event Action OnSubscriptionApplied;
-
-    public static GameManager Instance { get; private set; }
+    // Stores local player's identity
     public static Identity LocalIdentity { get; private set; }
-    public static DbConnection Conn { get; private set; }
 
-    // Wygodne property do wywołań reducerów z innych miejsc
-    public static dynamic Reducers => Conn?.Reducers;
+    // Main connection object to SpacetimeDB
+    public static DbConnection Conn { get; private set; }
 
     void Start()
     {
-        Instance = this;
+        // Set target frame rate for smoother gameplay
         Application.targetFrameRate = 60;
 
+        // Initialize database connection builder with handlers
         var builder = DbConnection.Builder()
             .OnConnect(HandleConnect)
             .OnConnectError(HandleConnectError)
@@ -31,149 +28,79 @@ public class GameManager : MonoBehaviour
             .WithUri(SERVER_URL)
             .WithModuleName(MODULE_NAME);
 
+        // Add authentication token if it exists
         if (PlayerPrefs.HasKey(AuthToken.Token))
         {
             builder = builder.WithToken(AuthToken.Token);
         }
 
+        // Build and assign the database connection
         Conn = builder.Build();
     }
 
-    void HandleConnect(DbConnection _conn, Identity identity, string token)
-    {
-        Debug.Log("Connected.");
-        AuthToken.SaveToken(token);
-        LocalIdentity = identity;
-        OnConnected?.Invoke();
+    // Flag to indicate waiting for item to be available
+    private bool waitingForItem = false;
 
+    void Update()
+    {
+        // On pressing Enter, send reducer to add an item
+        if (Input.GetKeyDown(KeyCode.Return))
+        {
+            Debug.Log("[GameManager] Enter key pressed — sending AddItem reducer");
+            Conn.Reducers.AddItem(11, "Miecz");
+            waitingForItem = true;
+        }
+
+        // If waiting for item, check if it's available in DB and log it
+        if (waitingForItem)
+        {
+
+            // Try to find the specific item with ID 11
+            var item = Conn.Db.Item.Id.Find(11);
+            if (item != null)
+            {
+                Debug.Log($"[GameManager] Item received: {item.Name}, qty: {item.Quantity}");
+                waitingForItem = false;
+            }
+        }
+    }
+
+    // Called when connection is successfully established
+    void HandleConnect(DbConnection conn, Identity identity, string token)
+    {
+        Debug.Log("[GameManager] Connected to SpacetimeDB.");
+
+        // Save authentication token
+        AuthToken.SaveToken(token);
+
+        // Store identity of connected player
+        LocalIdentity = identity;
+
+        // Subscribe to all tables in the database
         Conn.SubscriptionBuilder()
             .OnApplied(HandleSubscriptionApplied)
             .SubscribeToAllTables();
     }
 
-    void HandleConnectError(Exception ex)
+    // Called when subscription to tables is successfully applied
+    private void HandleSubscriptionApplied(SubscriptionEventContext ctx)
     {
-        Debug.Log($"Connection error: {ex}");
+        Debug.Log("Subscription applied!");
     }
 
-    void HandleDisconnect(DbConnection _conn, Exception ex)
+    // Called when connection attempt fails
+    void HandleConnectError(Exception ex)
     {
-        Debug.Log("Disconnected.");
+        Debug.LogError($"[GameManager] Connection error: {ex}");
+    }
+
+    // Called when disconnected from the server
+    void HandleDisconnect(DbConnection conn, Exception ex)
+    {
+        Debug.LogWarning("[GameManager] Disconnected.");
         if (ex != null)
         {
             Debug.LogException(ex);
         }
-    }
-
-    private void HandleSubscriptionApplied(SubscriptionEventContext ctx)
-    {
-        Debug.Log("Subscription applied!");
-        OnSubscriptionApplied?.Invoke();
-
-    }
-
-    public static bool IsConnected()
-    {
-        return Conn != null && Conn.IsActive;
-    }
-
-    public void Disconnect()
-    {
-        Conn.Disconnect();
-        Conn = null;
-    }
-
-    void Update()
-    {
-        // Your update code here
-    }
-
-    // --- Metody do wywoływania reducerów poprzez Conn.Reducers ---
-
-    // ADD methods
-    public void AddItem(uint id, string name)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.AddItem(id, name);
-    }
-
-    public void AddTrain(string id, string fromStationId, string toStationId, uint money)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.AddTrain(id, fromStationId, toStationId, money);
-    }
-
-    public void AddStation(string id, string name)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.AddStation(id, name);
-    }
-
-    public void AddWeapon(string name, uint attack)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.AddWeapon(name, attack);
-    }
-
-    public void AddArmor(string name, uint defence)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.AddArmor(name, defence);
-    }
-
-    public void AddConsumable(string name, uint value)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.AddConsumable(name, value);
-    }
-
-    public void AddExistingItemToPlayer(Identity playerIdentity, uint itemId)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.AddExistingItemToPlayer(playerIdentity, itemId);
-    }
-
-    // DELETE methods
-    public void DeleteItem(uint id)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.DeleteItem(id);
-    }
-
-    public void DeleteTrain(string id)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.DeleteTrain(id);
-    }
-
-    public void DeleteStation(string id)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.DeleteStation(id);
-    }
-
-    public void DeleteWeapon(uint id)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.DeleteWeapon(id);
-    }
-
-    public void DeleteArmor(uint id)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.DeleteArmor(id);
-    }
-
-    public void DeleteConsumable(uint id)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.DeleteConsumable(id);
-    }
-
-    // Example: EnterGame reducer invocation
-    public void EnterGame(string playerName)
-    {
-        if (!IsConnected() || Reducers == null) return;
-        Reducers.EnterGame(playerName);
     }
 }
